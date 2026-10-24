@@ -1,155 +1,155 @@
 # Splatoon Dummy Bot Controller (for Raspberry Pi 4)
 
-スプラトゥーンの試合途中での無操作ペナルティ（強制切断・マッチング制限）を防ぐため、**人間らしいダミー操作（塗り前進、潜伏移動、索敵、ジャンプ撃ちなど）をシミュレートするシステム**です。
+A system that **simulates human-like dummy input (paint & advance, swim & hide, look around, jump shots, etc.)** to prevent the "no-input" penalty (forced disconnect / matchmaking restriction) during a Splatoon match.
 
-Raspberry Pi 4 を起動しておくだけで、**お手元のスマホ（Safari / Chrome）からワンタップでダミー操作の開始・停止**が行えます。SwitchとはBluetoothで直接ペアリングするため、**USBケーブルは一切不要**です。
+Just boot up a Raspberry Pi 4, and you can **start/stop the dummy operation with one tap from your phone (Safari / Chrome)**. It pairs directly with the Switch over Bluetooth, so **no USB cable is required at all**.
 
 ---
 
-## システムの仕組み
+## How it works
 
 ```
-【あなたのスマホ】
-  │ (Wi-Fi経由でブラウザを開く)
+【Your phone】
+  │ (open a browser over Wi-Fi)
   ▼
-【Raspberry Pi 4】 ───(Bluetooth / NXBT方式)───> 【Nintendo Switch】
-  ・WebコントローラーUI                              ・プロコンとして直接ペアリング
-  ・人間らしいAI操作生成エンジン                     ・ケーブル不要の無線入力
+【Raspberry Pi 4】 ───(Bluetooth / NXBT)───> 【Nintendo Switch】
+  ・Web controller UI                          ・Paired directly as a Pro Controller
+  ・Human-like AI input engine                 ・Wireless input, no cable needed
 ```
 
-1. **ケーブル不要・完全無線**: Raspberry Pi 4内蔵のBluetoothで、`NXBT`ライブラリを使いSwitchにプロコンとして直接ペアリングします。本物のプロコンはSwitchに繋いだままでも、別のコントローラーとして共存できます。
-2. **スマホから直感操作**: スマホ画面に「START / STOP」「スティックのリアルタイム位置」が表示されます。
-3. **本物のプロコンのジャイロ(ジャイロエイム)も中継**: `nxbt_patches/`でnxbt本体に独自パッチを当て、本物のプロコンのジャイロ/加速度センサー値(`/dev/input/eventX`)をSwitchへリアルタイムに中継します（標準のnxbtにはこの機能はありません）。
-4. **ボット検知対策**:
-   - 単なる乱数ではなく「塗り前進 → イカ潜伏 → 周囲索敵 → ジャンプ撃ち」という目的を持った行動ステートマシン。
-   - 指の慣性（線形補間 Lerp）により、カクカクせず滑らかにスティックが動きます。
-   - 正規分布（ガウスノイズ）による微細な手ブレと不規則な時間変動を付与。
+1. **No cable, fully wireless**: Using the Raspberry Pi 4's built-in Bluetooth and the `NXBT` library, it pairs directly with the Switch as a Pro Controller. Your real Pro Controller can stay connected to the Switch the whole time, coexisting as a separate controller.
+2. **Intuitive control from your phone**: The phone screen shows "START / STOP" and the real-time stick position.
+3. **Relays the real Pro Controller's gyro (motion aiming) too**: A custom patch in `nxbt_patches/` is applied to nxbt itself, relaying the real Pro Controller's gyro/accelerometer data (`/dev/input/eventX`) to the Switch in real time (stock nxbt has no such feature).
+4. **Bot-detection countermeasures**:
+   - Not just random noise — a purposeful behavior state machine: "paint & advance → squid-swim hide → look around → jump shot."
+   - Finger inertia (linear interpolation / lerp) keeps stick movement smooth instead of jerky.
+   - Gaussian noise adds subtle hand-tremor and irregular timing variation.
 
 ---
 
-## 必要な機材
+## Required hardware
 
-1. **Raspberry Pi 4**（Bluetooth内蔵モデル。Pi 3/3B+/400/Zero W/Zero 2 WなどBluetooth搭載モデルでも動作します）
-2. **microSDカード（32GB推奨）または USBメモリ/外付けSSD（32GB以上）**
-   - Pi 4はUSBストレージからの起動に対応しています。Raspberry Piは電源ボタンが無く電源を強制的に抜く機会が多いため、**電源断でのファイルシステム破損を避けたい場合はUSB SSDでの運用を推奨**します（microSDカードは安価なコントローラーのため、書き込み中の電源断で破損しやすい既知の弱点があります）。
-3. **USB-C 電源アダプタ**（Pi 4の給電用）
+1. **Raspberry Pi 4** (a model with built-in Bluetooth; Pi 3/3B+/400/Zero W/Zero 2 W etc. with Bluetooth also work)
+2. **A microSD card (32GB recommended) or a USB flash drive / external SSD (32GB+)**
+   - The Pi 4 supports booting from USB storage. Since Raspberry Pi has no power button, the power often gets cut forcibly — **if you want to avoid filesystem corruption from sudden power loss, running from a USB SSD is recommended** (microSD cards use cheap controllers and are known to be prone to corruption if power is cut mid-write).
+3. **A USB-C power adapter** (to power the Pi 4)
 
 ---
 
-## セットアップ手順
+## Setup
 
-### ステップ 1: microSDカードにOSを書き込む
-1. PCに [Raspberry Pi Imager](https://www.raspberrypi.com/software/) をインストールします。
-2. デバイスには **Raspberry Pi 4**、OSには **Raspberry Pi OS (64-bit, Lite推奨)** を選択します。
-3. 設定（歯車マーク）で以下を設定します：
-   - ホスト名: `raspberrypi`
-   - ユーザー名とパスワードを設定
-   - **Wi-Fi設定**（自宅またはスマホのテザリングWi-Fi）
-   - **SSHを有効化**
-4. microSDカードに書き込み、Raspberry Pi 4 に挿して電源を入れます。
+### Step 1: Flash the OS onto the microSD card
+1. Install [Raspberry Pi Imager](https://www.raspberrypi.com/software/) on your PC.
+2. Choose **Raspberry Pi 4** as the device and **Raspberry Pi OS (64-bit, Lite recommended)** as the OS.
+3. In the settings (gear icon), configure:
+   - Hostname: `raspberrypi`
+   - Username and password
+   - **Wi-Fi settings** (your home or phone's tethering Wi-Fi)
+   - **Enable SSH**
+4. Flash the microSD card, insert it into the Raspberry Pi 4, and power it on.
 
-### ステップ 2: プログラムの配置と全自動インストール
-このリポジトリをクローンしたPCから、`deploy.sh`でラズパイへファイルを転送します（パスワード入力が必要です）：
+### Step 2: Deploy the code and run the fully automated install
+From the PC where you cloned this repository, transfer the files to the Pi with `deploy.sh` (you'll be prompted for the password):
 ```bash
-./deploy.sh [ユーザー名@ホスト名]   # 省略時は joho@raspberrypi.local
+./deploy.sh [user@host]   # defaults to joho@raspberrypi.local
 ```
 
-ラズパイにSSHして、自動セットアップを実行します：
+SSH into the Pi and run the automated setup:
 ```bash
-ssh <ユーザー名>@raspberrypi.local
+ssh <username>@raspberrypi.local
 cd pseude-splatoon-controller
 sudo ./setup.sh
 ```
-（`setup.sh`は依存パッケージのインストールに加え、`nxbt_patches/`のジャイロ中継用パッチを自動でnxbt本体に適用します。）
+(`setup.sh` installs the required packages and also automatically applies the gyro-relay patch from `nxbt_patches/` to the nxbt package itself.)
 
-セットアップが完了したら、指示に従ってラズパイを再起動します：
+Once setup finishes, reboot as instructed:
 ```bash
 sudo reboot
 ```
-*※これで次回から、ラズパイの電源を入れるだけで自動的にBluetoothペアリング待機状態になり、Webサーバーが立ち上がります。*
+*From then on, simply powering on the Pi will automatically put it into Bluetooth pairing-wait mode and bring up the web server.*
 
-> **重要**: セットアップ後に`sudo apt full-upgrade`や`sudo rpi-eeprom-update`を実行すると、環境によってはカーネル/Bluetoothドライバの更新により内蔵Bluetoothが不安定になることが確認されています（`Unexpected continuation frame`エラー等）。正常に動作している状態では、理由がない限りこれらのアップグレードは避けてください。
+> **Important**: We've confirmed that running `sudo apt full-upgrade` or `sudo rpi-eeprom-update` after setup can, depending on the environment, destabilize the onboard Bluetooth via kernel/driver updates (e.g. `Unexpected continuation frame` errors). Once things are working, avoid these upgrades unless you have a specific reason to run them.
 
 ---
 
-## 使い方（中継方式：プロコンの電源を切る必要はありません！）
+## Usage (relay mode — no need to turn off your Pro Controller!)
 
 ```
-【本物のプロコン】
-       │ （Bluetoothペアリング）
+【Real Pro Controller】
+       │ (Bluetooth pairing)
        ▼
-【Raspberry Pi 4】 ───(Bluetooth / NXBT)───> 【Nintendo Switch (1P)】
-  ・普段: プロコンの操作をそのままSwitchへ素通り（パススルー）
-  ・交代時: スマホで「START BOT」を押すと、プロコンを遮断してダミー操作へ切替
+【Raspberry Pi 4】 ───(Bluetooth / NXBT)───> 【Nintendo Switch (P1)】
+  ・Normally: Pro Controller input passes straight through to the Switch
+  ・On handoff: tap "START BOT" on your phone to cut the Pro Controller and switch to dummy input
        ▲
-       │ （Wi-Fi）
-【あなたのスマホ】
+       │ (Wi-Fi)
+【Your phone】
 ```
 
-1. **初回のみ: Pi 4とSwitchをペアリング**
-   - Switch側で「コントローラー」→「持ち方/順番を変える」を開いた状態でPi 4を起動します。
-   - `NXBT`が自動でペアリングを行い、Switchからは「プロコン」として認識されます（以後は`reconnect_address`により自動再接続）。
-2. **プロコンをラズパイに接続（普段通りプレイ）**
-   - 本物のプロコンをラズパイにBluetoothペアリング（またはUSB接続）します。
-   - ラズパイがプロコンの入力をそのままNXBT経由でSwitchへ素通り（パススルー）させるため、**普段通りにスプラトゥーンをプレイ**できます。
-3. **「急用などで席を立ちたい！」となったら**
-   - **スマホのブラウザで `http://raspberrypi.local` を開く**
-   - **巨大な【START BOT】ボタンをタップするだけ！**
-   - これだけで、プロコンの入力が自動で遮断され、**Switchからはプレイヤーが途切れず操作し続けているかのようにダミー操作へ瞬時にバトンタッチ**されます。ケーブルの抜き挿しやSwitchの持ち方確認画面も一切発生しません。
-4. **戻ってきたら**
-   - スマホで【STOP BOT】をタップすれば、すぐにプロコン操作に戻ってプレイを再開できます。
+1. **First time only: pair the Pi 4 with the Switch**
+   - Boot the Pi 4 while the Switch's "Controllers" → "Change Grip/Order" screen is open.
+   - `NXBT` pairs automatically, and the Switch recognizes it as a "Pro Controller" (it will auto-reconnect afterward via `reconnect_address`).
+2. **Connect the real Pro Controller to the Pi (play as usual)**
+   - Pair the real Pro Controller to the Pi over Bluetooth (or connect it via USB).
+   - The Pi passes the Pro Controller's input straight through to the Switch via NXBT, so you can **play Splatoon exactly as normal**.
+3. **When you need to step away for a moment**
+   - **Open `http://raspberrypi.local` in your phone's browser**
+   - **Just tap the big【START BOT】button!**
+   - The Pro Controller's input is automatically cut off, and **the Switch sees the handoff to dummy input as if the player never stopped playing**. No cable swapping, no Switch grip-confirmation screen, nothing.
+4. **When you're back**
+   - Tap【STOP BOT】on your phone to immediately return to Pro Controller control and resume playing.
 
-> **注意**: Raspberry Pi 4の1つのBluetoothアダプタで「本物のプロコンを読み取る(ホスト役)」と「Switchにプロコンとして振る舞う(ペリフェラル役)」を同時に行うため、環境によっては接続が不安定になる可能性があります。安定しない場合は、USBのBluetoothアダプタをもう1つ追加し、役割を分離することを検討してください。
+> **Note**: Since a single Bluetooth adapter on the Raspberry Pi 4 handles both "reading the real Pro Controller (host role)" and "acting as a Pro Controller to the Switch (peripheral role)" at the same time, the connection may become unstable in some environments. If it's unstable, consider adding a second USB Bluetooth adapter to separate the two roles.
 
 ---
 
-## Mac上での画面プレビュー・事前テスト
+## Preview / dry run on a Mac
 
-ラズパイを用意する前に、Mac上でスマホ操作画面やAIの挙動を直接体験できます。
+Before you have a Raspberry Pi, you can try out the phone control screen and the AI's behavior directly on a Mac.
 
 ```bash
-# プレビューサーバーの起動
+# Start the preview server
 python3 run_local_preview.py
 ```
-起動すると自動的にブラウザが開き、スマホ用の操作画面が表示されます。  
-「START BOT」を押すと、リアルタイムでスティックの動きやボタン入力がシミュレーションされます。
+A browser opens automatically, showing the phone control screen.
+Press "START BOT" and you'll see the stick movement and button input simulated in real time.
 
 ---
 
-## 運用上の注意: 安全な電源の切り方
+## Operational note: shutting down safely
 
-Raspberry Piには電源ボタンが無いため、つい電源ケーブルを直接抜いてしまいがちですが、**書き込み中に電源を切るとSDカード/USBストレージのファイルシステムが破損する**ことがあります（特にSSHが不調で正常終了できない状況が続くと、強制電源断を繰り返すリスクが高まります）。
+Since the Raspberry Pi has no power button, it's tempting to just pull the power cable — but **cutting power mid-write can corrupt the SD card / USB storage's filesystem** (this risk increases a lot if SSH is flaky and you end up forcing power cuts repeatedly).
 
-- 可能な限り、SSH等から `sudo shutdown -h now`（完全停止）または `sudo reboot`（再起動）を実行してから電源を切る/抜いてください。
-- 起動直後にアクティビティLED(緑)が点滅していたのに、その後**完全に消灯して反応が無くなった場合**、OSがクラッシュしている可能性が高いです。再起動しても同じ症状が再発する場合は、ストレージの再セットアップ（OS再書き込み）を検討してください。
-- 信頼性を重視するなら、microSDカードの代わりに**USB SSDからの起動**に切り替えるのがおすすめです（Pi 4はUSBストレージからの起動に対応）。
-- 本番運用に入る前に、`sudo raspi-config` → Performance Options → Overlay File System を有効化すると、通常運用時のSDカード書き込みがほぼ無くなり、電源を直接切っても壊れにくくなります（開発中は無効のままにしてください）。
+- Whenever possible, run `sudo shutdown -h now` (full stop) or `sudo reboot` (restart) over SSH before cutting/pulling power.
+- If the green activity LED was blinking right after boot but then **goes completely dark and stops responding**, the OS has likely crashed. If the same thing happens again after a reboot, consider re-flashing the storage.
+- For reliability, consider switching from a microSD card to **booting from a USB SSD** instead (the Pi 4 supports booting from USB storage).
+- Before going into production use, enabling `sudo raspi-config` → Performance Options → Overlay File System eliminates almost all SD-card writes during normal operation, making it much more resistant to corruption from a hard power-off (leave it disabled while you're still developing).
 
 ---
 
-## トラブルシューティング
+## Troubleshooting
 
-### Switchとのペアリングができない
-1. **Bluetoothがrfkillでブロックされていないか確認**:
+### Can't pair with the Switch
+1. **Check whether Bluetooth is blocked by rfkill**:
    ```bash
    bluetoothctl show
    ```
-   `Powered: no` / `PowerState: off-blocked`になっていたら:
+   If you see `Powered: no` / `PowerState: off-blocked`:
    ```bash
    sudo rfkill unblock bluetooth
    sudo systemctl restart bluetooth
    sudo systemctl restart splatoon-controller.service
    ```
-2. **`Discoverable: yes`なのにSwitchから見つからない場合**、HCIレベルで`ISCAN`(問い合わせスキャン)が立っていない可能性があります:
+2. **If `Discoverable: yes` but the Switch still can't find it**, the `ISCAN` (inquiry scan) flag may not actually be set at the HCI level:
    ```bash
    hciconfig hci0 -a
    ```
-   `PSCAN`はあるが`ISCAN`が無い場合:
+   If `PSCAN` is present but `ISCAN` is missing:
    ```bash
    sudo hciconfig hci0 piscan
    ```
-3. **別のBluetooth機器（スマホ等）でもラズパイが見つからない場合**は、内蔵Bluetoothハードウェア自体の問題です。ラズパイを再起動すると直ることがあります。直らない場合はUSB Bluetoothドングルでの運用を検討してください。
-4. それでも直らない場合、Switch側で**設定→本体→コントローラーとセンサー→すべてのワイヤレスコントローラーのペアリング情報を削除**してから再ペアリングを試してください。
+3. **If another Bluetooth device (e.g. your phone) also can't find the Pi**, it's an issue with the onboard Bluetooth hardware itself. Rebooting the Pi sometimes fixes it. If not, consider using a USB Bluetooth dongle instead.
+4. If it's still not working, on the Switch go to **Settings → System → Controllers and Sensors → Disconnect pairing info for all wireless controllers**, then try pairing again.
 
-### サービスの再起動が長時間返ってこない
-Bluetoothが不調な状態だと、終了処理(nxbtのクリーンアップ)がBluetoothのD-Bus呼び出しで詰まり、`systemctl restart`が90秒近く固まることがあります。上記のBluetooth不調を先に解消してください。
+### `systemctl restart` hangs for a long time
+When Bluetooth is misbehaving, the shutdown cleanup (nxbt's teardown) can get stuck on a Bluetooth D-Bus call, causing `systemctl restart` to hang for close to 90 seconds. Resolve the Bluetooth issue above first.
