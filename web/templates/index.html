@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Splatoon Dummy Bot Controller</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Mochiy+Pop+One&family=Zen+Kaku+Gothic+New:wght@500;700;900&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo-badge">
+        <span class="squid-icon">🦑</span>
+        <h1>SPLA-DUMMY</h1>
+      </div>
+      <div id="deviceStatus" class="status-badge mock">中継システム稼働中</div>
+    </header>
+
+    <!-- Passthrough Mode Indicator -->
+    <div id="modeBanner" class="mode-banner passthrough">
+      <span class="mode-icon">🎮</span>
+      <span id="modeText">プロコン中継中 (普段通りプレイ可能)</span>
+    </div>
+
+    <!-- Main Toggle Button -->
+    <section class="main-card">
+      <button id="btnMainToggle" class="big-power-btn stopped" onclick="toggleBot()">
+        <div class="power-icon-wrapper">
+          <svg class="power-svg" viewBox="0 0 24 24">
+            <path d="M12 2v10M18.36 5.64a9 9 0 1 1-12.73 0" />
+          </svg>
+        </div>
+        <div id="mainBtnText" class="power-text">START BOT</div>
+        <div id="mainBtnSub" class="power-sub">タップしてダミー操作に切替</div>
+      </button>
+    </section>
+
+    <!-- Monitor Panel -->
+    <section class="monitor-card">
+      <div class="monitor-header">
+        <span class="monitor-title">リアルタイム動作状況</span>
+        <span id="elapsedTime" class="time-label">00:00</span>
+      </div>
+
+      <div class="current-action-box">
+        <div class="action-label">現在の操作モード</div>
+        <div id="actionName" class="action-value">プロコン操作中 (パススルー)</div>
+      </div>
+
+      <!-- Stick Visualizer -->
+      <div class="sticks-container">
+        <div class="stick-box">
+          <div class="stick-label">Lスティック (移動)</div>
+          <div class="stick-plate">
+            <div id="lStickDot" class="stick-dot"></div>
+          </div>
+        </div>
+        <div class="stick-box">
+          <div class="stick-label">Rスティック (カメラ)</div>
+          <div class="stick-plate">
+            <div id="rStickDot" class="stick-dot"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Button Indicators -->
+      <div class="buttons-indicator-row">
+        <div id="btnZR" class="btn-pill">ZR 射撃</div>
+        <div id="btnZL" class="btn-pill">ZL 潜伏</div>
+        <div id="btnB" class="btn-pill">B ジャンプ</div>
+      </div>
+    </section>
+
+    <!-- Settings Card -->
+    <section class="settings-card">
+      <h3>設定</h3>
+
+      <div class="setting-item">
+        <label for="playStyleSelect">プレイスタイル:</label>
+        <select id="playStyleSelect" onchange="onSettingChange()">
+          <option value="balanced" selected>バランス型 (塗り＋潜伏＋索敵)</option>
+          <option value="stealth">潜伏重視 (センプク回復多め)</option>
+          <option value="aggressive">アグレッシブ (射撃・ジャンプ撃ち多め)</option>
+        </select>
+      </div>
+
+      <div class="setting-item">
+        <label for="timerSelect">自動停止タイマー:</label>
+        <select id="timerSelect" onchange="onSettingChange()">
+          <option value="180">3分 (ナワバリバトル1試合)</option>
+          <option value="300" selected>5分 (バンカラマッチ1試合)</option>
+          <option value="600">10分</option>
+          <option value="0">無制限 (手動停止まで)</option>
+        </select>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <p>Raspberry Pi 4 × Nintendo Switch Bluetooth Controller Emulation (NXBT)</p>
+    </footer>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
