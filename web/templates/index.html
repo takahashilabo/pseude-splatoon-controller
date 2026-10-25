@@ -17,7 +17,10 @@
         <span class="squid-icon">🦑</span>
         <h1>SPLA-DUMMY</h1>
       </div>
-      <div id="deviceStatus" class="status-badge mock">中継システム稼働中</div>
+      <div class="status-badge-group">
+        <div id="controllerStatus" class="status-badge mock">プロコン(ラズパイ)未接続</div>
+        <div id="deviceStatus" class="status-badge mock">中継システム稼働中</div>
+      </div>
     </header>
 
     <!-- Passthrough Mode Indicator -->
@@ -96,6 +99,21 @@
           <option value="600">10分</option>
           <option value="0">無制限 (手動停止まで)</option>
         </select>
+      </div>
+    </section>
+
+    <!-- System Card -->
+    <section class="settings-card">
+      <h3>システム</h3>
+
+      <div class="setting-item">
+        <label>ラズパイ→Switchへの入力送信 (本物のプロコンと直接比較したい時に一時停止):</label>
+        <button id="btnSwitchConn" class="setting-btn" onclick="toggleSwitchConnection()">一時停止する</button>
+      </div>
+
+      <div class="setting-item">
+        <label>ラズパイ本体 (電源ケーブルを抜く前に必ずこちらで安全に終了):</label>
+        <button id="btnShutdown" class="setting-btn danger" onclick="shutdownPi()">ラズパイをシャットダウン</button>
       </div>
     </section>
 

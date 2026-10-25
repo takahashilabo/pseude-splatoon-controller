@@ -66,6 +66,13 @@ h1 {
   -webkit-text-fill-color: transparent;
 }
 
+.status-badge-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
 .status-badge {
   font-size: 11px;
   font-weight: 700;
@@ -417,6 +424,28 @@ h1 {
   border-radius: 10px;
   font-size: 13px;
   outline: none;
+}
+
+.setting-btn {
+  width: 100%;
+  padding: 10px 12px;
+  background: #12141c;
+  border: 1px solid var(--card-border);
+  color: var(--text-main);
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.1s ease, filter 0.2s ease;
+}
+
+.setting-btn:active {
+  transform: scale(0.98);
+}
+
+.setting-btn.danger {
+  border-color: var(--danger-color);
+  color: var(--danger-color);
 }
 
 /* Backup Details */

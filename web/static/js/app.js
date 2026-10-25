@@ -9,6 +9,7 @@ const mainBtnText = document.getElementById("mainBtnText");
 const mainBtnSub = document.getElementById("mainBtnSub");
 const modeBanner = document.getElementById("modeBanner");
 const modeText = document.getElementById("modeText");
+const controllerStatus = document.getElementById("controllerStatus");
 const deviceStatus = document.getElementById("deviceStatus");
 const actionName = document.getElementById("actionName");
 const elapsedTime = document.getElementById("elapsedTime");
@@ -19,6 +20,10 @@ const btnZL = document.getElementById("btnZL");
 const btnB = document.getElementById("btnB");
 const playStyleSelect = document.getElementById("playStyleSelect");
 const timerSelect = document.getElementById("timerSelect");
+const btnSwitchConn = document.getElementById("btnSwitchConn");
+const btnShutdown = document.getElementById("btnShutdown");
+
+let outputMuted = false;
 
 function formatTime(sec) {
   const m = Math.floor(sec / 60).toString().padStart(2, '0');
@@ -40,16 +45,40 @@ async function fetchStatus() {
 function updateUI(data) {
   isRunning = data.is_running;
 
-  // デバイスステータスバッジ
+  // デバイスステータスバッジ (ラズパイ→Switch側。この接続方式は常にBluetooth固定で、
+  // 本物のプロコン→ラズパイの接続方式(有線/BT)とは無関係)
   if (data.is_mock) {
     deviceStatus.textContent = "シミュレーション (Mock)";
     deviceStatus.className = "status-badge mock";
   } else if (data.switch_paired) {
-    deviceStatus.textContent = "Switch接続中 (Bluetooth)";
+    deviceStatus.textContent = "ラズパイ→Switch: 接続中";
     deviceStatus.className = "status-badge connected";
   } else {
-    deviceStatus.textContent = "Switchとペアリング待ち...";
+    deviceStatus.textContent = "ラズパイ→Switch: ペアリング待ち";
     deviceStatus.className = "status-badge mock";
+  }
+
+  // Switchへの入力送信 一時停止/再開ボタンの表示切り替え
+  // (Bluetooth接続自体は維持したまま、入力送信だけ止める安全な方式)
+  outputMuted = !!data.switch_output_muted;
+  if (data.is_mock) {
+    btnSwitchConn.disabled = true;
+    btnSwitchConn.textContent = "Mockモードのため操作不可";
+  } else {
+    btnSwitchConn.disabled = false;
+    btnSwitchConn.textContent = outputMuted ? "再開する" : "一時停止する";
+  }
+
+  // 本物のプロコン→ラズパイ側の接続状態バッジ (有線/Bluetoothを明示)
+  if (data.controller_connected) {
+    const linkLabel = data.controller_link_type === "usb" ? "有線"
+      : data.controller_link_type === "bluetooth" ? "Bluetooth"
+      : "不明";
+    controllerStatus.textContent = `プロコン→ラズパイ: 接続中 (${linkLabel})`;
+    controllerStatus.className = "status-badge connected";
+  } else {
+    controllerStatus.textContent = "プロコン→ラズパイ: 未接続";
+    controllerStatus.className = "status-badge mock";
   }
 
   // 中継モードバナー & メインボタン
@@ -129,6 +158,30 @@ function onSettingChange() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ style: style, auto_stop_sec: autoStopSec })
     });
+  }
+}
+
+async function toggleSwitchConnection() {
+  const endpoint = outputMuted ? "/api/switch/reconnect" : "/api/switch/disconnect";
+  btnSwitchConn.disabled = true;
+  try {
+    await fetch(endpoint, { method: "POST" });
+  } catch (e) {
+    console.error(e);
+  }
+  fetchStatus();
+}
+
+async function shutdownPi() {
+  if (!confirm("ラズパイをシャットダウンします。再度使うには電源を入れ直す必要があります。よろしいですか？")) {
+    return;
+  }
+  btnShutdown.disabled = true;
+  btnShutdown.textContent = "シャットダウン中...";
+  try {
+    await fetch("/api/system/shutdown", { method: "POST" });
+  } catch (e) {
+    console.error(e);
   }
 }
 

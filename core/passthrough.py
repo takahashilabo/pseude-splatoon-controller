@@ -52,12 +52,31 @@ class ControllerPassthrough:
         self.is_running = False
         self.is_connected = False
         self.bot_active = False  # True の時はプロコンを無視してBOTが操作
-        
+        # 実機プロコンがUSB(有線)かBluetoothか。 "usb" / "bluetooth" / "unknown"
+        self.link_type = "unknown"
+
         self.hat_x = 0
         self.hat_y = 0
-        
+
         self.thread: Optional[threading.Thread] = None
         self._fd: Optional[int] = None
+
+    def _detect_link_type(self) -> str:
+        """/sys/class/input/jsX/device のシンボリックリンク先のパスから、
+        実機プロコンがUSB接続かBluetooth接続かを判定する。
+        """
+        name = os.path.basename(self.js_device_path)  # 例: "js0"
+        sys_path = f"/sys/class/input/{name}/device"
+        try:
+            real_path = os.path.realpath(sys_path).lower()
+        except OSError:
+            return "unknown"
+
+        if "bluetooth" in real_path:
+            return "bluetooth"
+        if "usb" in real_path:
+            return "usb"
+        return "unknown"
 
     def start(self):
         """パススルー監視スレッドを開始"""
@@ -115,13 +134,15 @@ class ControllerPassthrough:
                 if self.is_connected:
                     logger.warning("[!] プロコンが切断されました。再接続を待機します。")
                     self.is_connected = False
+                    self.link_type = "unknown"
                 time.sleep(1.0)
                 continue
 
             try:
                 self._fd = os.open(self.js_device_path, os.O_RDONLY | os.O_NONBLOCK)
                 self.is_connected = True
-                logger.info(f"[+] プロコンが正常に接続されました！中継を開始します。")
+                self.link_type = self._detect_link_type()
+                logger.info(f"[+] プロコンが正常に接続されました！({self.link_type}) 中継を開始します。")
 
                 while self.is_running and os.path.exists(self.js_device_path):
                     # select でイベント到着を待つ (タイムアウト 0.1秒)
@@ -129,40 +150,50 @@ class ControllerPassthrough:
                     if not r:
                         continue
 
-                    # Linux Joystick API イベント読み出し (8バイト)
-                    chunk = os.read(self._fd, 8)
-                    if len(chunk) < 8:
-                        continue
+                    # スティックを速く動かすと短時間に多数の軸イベントが
+                    # 発生する。1イベントごとに送信すると、送信(IPC)の方が
+                    # イベント発生より遅くなった場合に古い状態の送信が
+                    # 後からキューに積まれ、実質的な反応が遅れる。
+                    # なので読める分を全部読み切り、最新の状態を1回だけ送る。
+                    got_event = False
+                    while True:
+                        try:
+                            chunk = os.read(self._fd, 8)
+                        except BlockingIOError:
+                            break
+                        if len(chunk) < 8:
+                            break
+                        got_event = True
 
-                    _, value, event_type, number = struct.unpack("IhBB", chunk)
-                    event_type &= ~JS_EVENT_INIT  # 初期化フラグを除去
+                        _, value, event_type, number = struct.unpack("IhBB", chunk)
+                        event_type &= ~JS_EVENT_INIT  # 初期化フラグを除去
 
-                    if event_type == JS_EVENT_BUTTON:
-                        btn = BTN_MAP.get(number)
-                        if btn:
-                            self.state.set_button(btn, bool(value))
+                        if event_type == JS_EVENT_BUTTON:
+                            btn = BTN_MAP.get(number)
+                            if btn:
+                                self.state.set_button(btn, bool(value))
 
-                    elif event_type == JS_EVENT_AXIS:
-                        # -32767 〜 +32767 を -100.0 〜 +100.0 に変換
-                        norm_val = max(-100.0, min(100.0, (value / 32767.0) * 100.0))
-                        
-                        if number == 0:    # Lスティック X
-                            self.state.lx = norm_val
-                        elif number == 1:  # Lスティック Y (倒すと負値になるため反転)
-                            self.state.ly = -norm_val
-                        elif number == 2:  # Rスティック X
-                            self.state.rx = norm_val
-                        elif number == 3:  # Rスティック Y
-                            self.state.ry = -norm_val
-                        elif number == 4:  # 十字キー 左右
-                            self.hat_x = value
-                            self._update_hat()
-                        elif number == 5:  # 十字キー 上下
-                            self.hat_y = value
-                            self._update_hat()
+                        elif event_type == JS_EVENT_AXIS:
+                            # -32767 〜 +32767 を -100.0 〜 +100.0 に変換
+                            norm_val = max(-100.0, min(100.0, (value / 32767.0) * 100.0))
+
+                            if number == 0:    # Lスティック X
+                                self.state.lx = norm_val
+                            elif number == 1:  # Lスティック Y (倒すと負値になるため反転)
+                                self.state.ly = -norm_val
+                            elif number == 2:  # Rスティック X
+                                self.state.rx = norm_val
+                            elif number == 3:  # Rスティック Y
+                                self.state.ry = -norm_val
+                            elif number == 4:  # 十字キー 左右
+                                self.hat_x = value
+                                self._update_hat()
+                            elif number == 5:  # 十字キー 上下
+                                self.hat_y = value
+                                self._update_hat()
 
                     # BOTが動いていない時は、プロコンの操作をそのままSwitchへパススルー！
-                    if not self.bot_active:
+                    if got_event and not self.bot_active:
                         self.driver.send_state(self.state)
 
             except Exception as e:

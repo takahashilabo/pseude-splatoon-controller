@@ -6,6 +6,7 @@ Splatoon Dummy Controller - Mobile Web Server & API
 import sys
 import os
 import time
+import subprocess
 import threading
 import logging
 from flask import Flask, render_template, jsonify, request
@@ -95,12 +96,22 @@ class BotWorker:
 
         self.driver.reset()
 
+    def disconnect_switch(self):
+        """Switchへの入力送信を一時停止する (本物のプロコンを直接Switchに繋いで比較したい時などに使う)"""
+        self.driver.disconnect()
+
+    def reconnect_switch(self):
+        """一時停止していたSwitchへの入力送信を再開する"""
+        self.driver.reconnect()
+
     def get_status(self):
         status = self.ai.get_status_dict()
         status["is_running"] = self.is_running
         status["is_mock"] = self.driver.is_mock
         status["switch_paired"] = self.driver.is_connected
+        status["switch_output_muted"] = self.driver._output_muted
         status["controller_connected"] = self.passthrough.is_connected
+        status["controller_link_type"] = self.passthrough.link_type
         status["elapsed_sec"] = round(time.time() - self.start_time, 1) if self.is_running else 0.0
         status["auto_stop_sec"] = self.auto_stop_sec
         return status
@@ -132,6 +143,26 @@ def api_start():
 def api_stop():
     worker.stop()
     return jsonify({"success": True, "status": worker.get_status()})
+
+
+@app.route("/api/switch/disconnect", methods=["POST"])
+def api_switch_disconnect():
+    worker.disconnect_switch()
+    return jsonify({"success": True, "status": worker.get_status()})
+
+
+@app.route("/api/switch/reconnect", methods=["POST"])
+def api_switch_reconnect():
+    worker.reconnect_switch()
+    return jsonify({"success": True, "status": worker.get_status()})
+
+
+@app.route("/api/system/shutdown", methods=["POST"])
+def api_system_shutdown():
+    logger.info("[*] Webからシャットダウン要求を受け付けました。")
+    # レスポンスを返した後にシャットダウンが始まるよう、少し遅延させてバックグラウンドで実行
+    subprocess.Popen(["shutdown", "-h", "+0"])
+    return jsonify({"success": True})
 
 
 if __name__ == "__main__":

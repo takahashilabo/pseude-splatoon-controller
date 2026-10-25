@@ -7,6 +7,7 @@ BlueZ経由でSwitchへ直接「プロコン」としてBluetoothペアリング
 
 import logging
 import threading
+import time
 from typing import Optional
 
 from core.controller_state import ControllerState, SwitchButton, SwitchHat
@@ -56,6 +57,20 @@ class NXBTDriver:
         self.is_connected = False
         self._nx: Optional["nxbt.Nxbt"] = None
         self._controller_index: Optional[int] = None
+        # コントローラのstate proxyを1回だけ取得してキャッシュする。
+        # 毎回 self._nx.manager_state[index] を経由すると、外側Manager
+        # ->内側Managerの2段IPCになり、呼び出し頻度(特にIMUの120Hz)に
+        # 比例して遅延が乗る。proxyオブジェクト自体はコントローラ生存中
+        # 不変なので、キャッシュして1段分のIPCを毎回削る。
+        self._state = None
+        # 入力送信を一時停止するフラグ (Bluetooth接続自体はそのまま維持する)
+        self._output_muted = False
+
+        # --- 一時的な計測用 (レイテンシ調査のため) ---
+        # ラベルごとに直近の書き込み時間を集計し、一定間隔でまとめてログ出力する。
+        self._timing_samples = {}   # label -> [elapsed_ms, ...]
+        self._timing_last_log = {}  # label -> last logged wall time
+        self._timing_log_interval = 2.0
 
         if self.is_mock:
             logger.info("[*] nxbt パッケージが見つからないため [Mockモード (シミュレーション)] で動作します。")
@@ -63,14 +78,64 @@ class NXBTDriver:
 
         try:
             self._nx = nxbt.Nxbt()
-            self._controller_index = self._nx.create_controller(
-                nxbt.PRO_CONTROLLER,
-                reconnect_address=self._nx.get_switch_addresses(),
-            )
-            threading.Thread(target=self._wait_connection, daemon=True).start()
+            self._create_and_connect()
         except Exception as e:
             logger.warning(f"[!] nxbt の初期化に失敗 ({e})。Mockモードに移行します。")
             self.is_mock = True
+
+    def _create_and_connect(self):
+        """コントローラを生成し、Switchへの接続待ちを開始する。"""
+        self._controller_index = self._nx.create_controller(
+            nxbt.PRO_CONTROLLER,
+            reconnect_address=self._nx.get_switch_addresses(),
+        )
+        self._state = self._nx.manager_state[self._controller_index]
+        threading.Thread(target=self._wait_connection, daemon=True).start()
+
+    def disconnect(self):
+        """入力送信を一時停止する (Bluetooth接続自体は維持したまま)。
+
+        以前は remove_controller()/create_controller() でコントローラ自体を
+        作り直す実装だったが、古いコントローラのプロセスがBluetoothアダプタを
+        解放する前に新しいコントローラがそれを使おうとして競合し、接続不能に
+        なる既知の不安定要因があった(過去にも同種の再接続処理で実際に発生した
+        regressionと同じパターン)。本物のプロコンと直接比較したいだけであれば
+        Bluetooth接続自体を切る必要はなく、送信を止めるだけで十分なので、
+        よりリスクの低いこちらに変更した。
+        """
+        # 停止直前の入力(スティックを倒した状態など)が残り続けないよう、
+        # 停止前にニュートラル状態を一度送っておく。
+        if self._state is not None:
+            try:
+                self._state["direct_input"] = self._nx.create_input_packet()
+            except Exception:
+                pass
+        self._output_muted = True
+        logger.info("[*] Switchへの入力送信を一時停止しました (接続は維持)。")
+
+    def reconnect(self):
+        """一時停止していた入力送信を再開する。"""
+        self._output_muted = False
+        logger.info("[*] Switchへの入力送信を再開しました。")
+
+    def _record_timing(self, label: str, elapsed_ms: float):
+        """IPC書き込み1回あたりの時間を集計し、2秒おきに平均/最大/回数をログ出力する。
+        レイテンシ調査用の一時的な計測なので、原因が特定できたら削除してよい。
+        """
+        samples = self._timing_samples.setdefault(label, [])
+        samples.append(elapsed_ms)
+
+        now = time.time()
+        last = self._timing_last_log.get(label, 0.0)
+        if now - last >= self._timing_log_interval:
+            if samples:
+                avg = sum(samples) / len(samples)
+                mx = max(samples)
+                logger.info(
+                    f"[timing] {label}: avg={avg:.2f}ms max={mx:.2f}ms "
+                    f"count={len(samples)} (直近{self._timing_log_interval:.0f}秒)")
+            self._timing_samples[label] = []
+            self._timing_last_log[label] = now
 
     def _wait_connection(self):
         """Switch側の「コントローラー」→「持ち方/順番を変える」画面でペアリングされるまで待機"""
@@ -84,7 +149,7 @@ class NXBTDriver:
 
     def send_state(self, state: ControllerState):
         """ControllerStateオブジェクトをnxbtの入力パケットに変換して送信"""
-        if self.is_mock or self._nx is None or not self.is_connected:
+        if self.is_mock or self._state is None or not self.is_connected or self._output_muted:
             return
 
         packet = self._nx.create_input_packet()
@@ -115,7 +180,9 @@ class NXBTDriver:
         packet["R_STICK"]["PRESSED"] = bool(state.buttons & SwitchButton.RCLICK)
 
         try:
-            self._nx.set_controller_input(self._controller_index, packet)
+            t0 = time.perf_counter()
+            self._state["direct_input"] = packet
+            self._record_timing("direct_input", (time.perf_counter() - t0) * 1000)
         except Exception as e:
             logger.error(f"NXBT入力送信エラー: {e}")
 
@@ -126,11 +193,13 @@ class NXBTDriver:
         nxbt_patches/protocol.py の set_imu_samples() 拡張が適用されている
         場合のみ有効 (未適用のnxbtでは何も起きない)。
         """
-        if self.is_mock or self._nx is None or self._controller_index is None:
+        if self.is_mock or self._state is None or self._output_muted:
             return
         try:
-            samples = list(accel_xyz) + list(gyro_xyz)
-            self._nx.manager_state[self._controller_index]["direct_imu"] = samples
+            imu_samples = list(accel_xyz) + list(gyro_xyz)
+            t0 = time.perf_counter()
+            self._state["direct_imu"] = imu_samples
+            self._record_timing("direct_imu", (time.perf_counter() - t0) * 1000)
         except Exception as e:
             logger.error(f"IMU送信エラー: {e}")
 
